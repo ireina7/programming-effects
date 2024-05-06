@@ -309,11 +309,40 @@ command = do
 
 ## Monad的组合问题
 Monad看起来似乎很美好？NO！Monad居然不是可以随意组合的！？
+考虑我们拿到了`M`, `N`两个monad，并打算组合它们：
+```rust
+struct Compose<M: Hkt, N: Hkt> {
+    _data: PhantomData<M::Ap<N::Ap<()>>>,
+}
 
+impl<M: Hkt, N: Hkt> Hkt for Compose<M, N> {
+    type F<A> = M::Ap<N::Ap<A>>;
+}
+
+
+impl<M: Monad, N: Monad> Monad for Compose<M, N> {
+    // how???
+}
+```
+理论上想给任意两个monad实现组合之后的bind是无法实现的（你可以尝试一下）。
+这意味着无法随意组合不同的monad，想象一下一个lib使用`M`，另一个使用了`N`，它们却无法组合。。。这显然会在实践中带来问题，于是Haskell又发明了monad transformer...这里我不打算深入monad transformer，其核心思想就是虽然任意两个不能实现组合，但是只要确定了其中一个，就可以实现组合。可即使是这样，monad组合在实践中还有很多其他问题，比如如何确定组合嵌套的顺序问题。
 
 ## Monad为什么不适合无GC的语言
+Monad除了存在组合问题，它甚至不适合无gc的语言，准确来讲，不适合存在用生命周期进行资源管理的语言。考虑下面这样一个嵌套结构：
+```rust
+type Nested<A> = M<'a, M<'b, M<'c, A>>>;
+```
+我们知道，monad可以对这种洋葱结构进行折叠，但是rust的生命周期约束要求：
+```rust
+'c: 'b : 'a
+```
+这意味着`Nested<A>`可能存在内外嵌套结构的生命周期依赖，`'c`必须比`'b`生命周期更长，monad不能随意折叠。因此rust不会大量使用monad作何抽象的核心。
 
 ## Tagless Final：抽象Monad
+对于第一个monad组合问题，我们还找到了另一个更practical的解，即
+> 将monad全部抽象出来，使得程序对任意monad成立
+
+
 
 ## Free monad：One monad for all
 
@@ -325,7 +354,7 @@ Monad看起来似乎很美好？NO！Monad居然不是可以随意组合的！�
 
 ## Higher-level monad
 
-## Tokio
+## Mio & Tokio
 
 
 
