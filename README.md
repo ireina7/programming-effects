@@ -367,15 +367,58 @@ Tagless final之所以存在性能问题，是因为bind函数无法被抹平，
 
 
 ## 代数计算效应
-由于monad的组合问题，没有一种方案是完美的，人们发明了一种稍微弱化的计算效应，即*代数计算效应（Algebraic effects）*。
+由于monad的组合问题，没有一种方案是完美的，人们发明了一种稍微弱化的计算效应，即*代数计算效应（Algebraic effects，AE）*。准确地描述AE需要涉及到相对复杂的lawvere theory，不是我们的重点，这里我们仅需要关注：
+- AE采用operation来建模计算效应，没有monad的组合问题
+- AE没有monad general，比如无法替代continuation monad
 
-## One-shot effects
+对于编程来讲，最直观的理解AE的方式大概是把AE看作可以resume的try-catch。
+对于普通的try-catch，一旦一个exception被catch到了之后，其原本的上下文会被清除掉，自然无法回到原本的调用位置。而AE则可以resume回原本的位置，某种意义上可以看作一种结构化的goto：
+```java
+void consume_effects() {
+    try {
+        effectful();
+    } catch(IOEffect io) {
+        // IO副作用
+        resume;
+    } catch(Exception ex) {
+        // 错误
+    }
+}
+```
+AE比monad在工程上已经有了一些应用，比如react的运行时、ocaml5的运行时；
+在理论探索上，koka语言完整实现了类型安全的AE。
+
+## Linear effects
+那么在rust中我们可不可以实现AE呢？其实是可以的！只是在rust这样无gc的语言中，我们需要考虑资源的管理问题，那么我们必然需要对AE进一步加以限制，保证资源的正确释放。这里我们引入linear effect的概念。linear effect可以看作coroutine的理论概念，因为在coroutine中，任何一个计算可以被“暂停”存储下来，当时机适合时再恢复计算。这样的计算continuation如果无法被复制与消除，保证一种线性特性（linear），任何资源不会被随意销毁和复制，其必须遵守生命周期内的约束，与rust的affine type系统十分契合；
+
+事实上，仔细观察我们的future系统，本质上我们已经获得了弱化的linear effect!
+我们用poll来实现不同effect是如何控制continuation的，用pin来保证资源不会被随意move。只需要搭配上不同操作的trait，依然获得了一个非常practical的线性计算效应系统！（有时间补上例子）
 
 ## 基本计算效应
+接下来让我们看看有哪些常用的计算效应，其中有三个计算效应最为常见（在工程上几乎无处不在）：
+- 状态管理，也可以看作IO
+- 观测与debugging系统
+- 依赖注入系统
+
+### 状态（IO）
+状态和IO为什么放在一起？因为没有可变状态很大程度上就没有专门处理IO的必要了。
+其实可变状态是一个非常非常奇妙的概念，以至于我们在日常生活中已经习惯了它的存在并习以为常了。
+
+### Debugging
+### 依赖注入
+### 不确定性
 
 ## Higher-level monad
 
 ## Mio & Tokio
+让我们来看看rust的线性计算效应运行时是如何实现的。
 
+### 线程池
+### worker-local queue
+### 任务steal
 
+## 为什么副作用抽象是重要的
+### 理论上
+### 工程上
 
+## 结语
