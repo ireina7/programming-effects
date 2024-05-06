@@ -338,15 +338,36 @@ type Nested<A> = M<'a, M<'b, M<'c, A>>>;
 ```
 这意味着`Nested<A>`可能存在内外嵌套结构的生命周期依赖，`'c`必须比`'b`生命周期更长，monad不能随意折叠。因此rust不会大量使用monad作何抽象的核心。
 
+除了生命周期问题，对于资源管理，monad还会导致一个问题：
+由于continuation的使用是没有限制的，这意味着所有continuation必须至少是`FnMut`，导致资源的释放成为问题。
+
 ## Tagless Final：抽象Monad
 对于第一个monad组合问题，我们还找到了另一个更practical的解，即
 > 将monad全部抽象出来，使得程序对任意monad成立
 
+还是举我们之前的例子：
+```rust
+trait GetChar<M: Hkt> {
+    fn get_char() -> M::Ap<u8>;
+}
 
+fn command<M: Monad, Io: GetChar<M>>() -> M::Ap<()> {
+    M::bind(Io::get_char(), |c| {
+        // 剩余的计算
+    })
+}
+```
+
+我曾经尝试用Scala把一个中型项目所有副作用全部用这种方式来架构（得益于Scala原生支持do-notation），程序的可拓展性非常高，但是性能没有经过优化有许多问题，同时debugging缺乏合适的工具。
+
+Tagless final之所以存在性能问题，是因为bind函数无法被抹平，因为本质上bind是个外部的函数，command内部无法提前知道bind的内部结构并进行优化，导致大量的编译期优化无法进行，这就是抽象的代价。
 
 ## Free monad：One monad for all
+除了Tagless final，人们还发明了free monad。如果你之前了解过抽象代数中的free structure，那么free monad是十分直观的。如果不了解也没关系，其实free monad就是强硬地用monad来表示任意计算，从而不依赖任何其它monad。
+
 
 ## 代数计算效应
+由于monad的组合问题，没有一种方案是完美的，人们发明了一种稍微弱化的计算效应，即*代数计算效应（Algebraic effects）*。
 
 ## One-shot effects
 
