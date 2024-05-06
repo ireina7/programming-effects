@@ -148,9 +148,95 @@ mod io {
 
 这里如果熟悉rust的同学一定已经脱口而出：*async-await*！但是我们还没有抵达这么远，我们还需要一步一步抵达async的真实。如果我们仅仅聚焦于阻塞的问题，仅仅考虑如何最大化利用计算的资源，那么模型是十分多样的：IO复用、信号驱动IO、完全异步模型、事件循环etc。选择任何一种都是有可能的，但是我们不想让我们的程序被局限在任何一种方式中，因为程序本身的业务逻辑应该是独立于这种IO副作用的！我们希望程序员不需要关心副作用的同时，可以自由选择副作用的实现方式，同一份代码可以应用于各种各样不同的IO场景下！如果我们的`get_char`函数进行了实际的计算，尽管我们已经用trait进行了抽象，`get_char`可以使用不同的计算方式来实现，但是无论哪一种方式，其continuation都依赖了`c`，意味着continuation本身都不得不等待得到`get_char`的运算结果`c`之后才能继续运算！如果`get_char`没有运算完，也许`command`函数之外的continuation不依赖这里的逻辑，也许可以让其他计算先进行计算，不必让线程等待在这里。
 
-## Async.await
+这里显然超出了`bind`的能力了，我们需要的是一个第三方运行时，它可以观测到计算的结构，并自动进行调度！所以下面的问题在于我们需要把计算以某种形式的结构呈现给一个运行时，并委托其进行调度计算，同时最大化复用计算资源。这种计算的形式可以看作是一种用数据结构来表述计算的一种描述。
+
+## 异步计算的描述
+接下来我们将进入异步计算的世界。异步计算最早使用了回调（callback）来进行编写，像极了我们的`bind`模式：
+```js
+let fut = io.getChar()
+fut.andThen(c => {
+    // 剩余计算...
+})
+```
+`fut`就是对计算的一种描述，然后我们通过类似`bind`的方法`andThen`在`fut`的基础上搭建更大的数据结构来表示剩余的计算，最后这个`fut`就可以交给一个`Runtime去跑，自动化完成IO。但是我们现在既不知道这个结构该如何构造，也不知道Runtime该如何实现。关于如何去表示计算，有两种比较常见的方式：有栈与无栈协程（coroutine）。
+
+### Stackful Coroutine
+计算的构造其实在操作系统中就已经有了！那就是我们的stack和各种表示计算上下文的register（如pc）。我们也许可以继续拓展这一概念，把剩余的计算表示成这种数据结构，任何IO计算显式地告诉Runtime自己可能会阻塞，那么runtime就可以自动yield当前计算，让其他计算先进行，然后将被阻塞的剩余的计算保存下来，等待IO结束恢复原本的计算。
+
+实际上这就是Golang的goroutine实现，同时也是golang得以流行的核心原因（不是大道智减！）。然而有栈协程并不能解决所有问题，栈显然太重了，很多任务可能并不希望将整个栈都保存下来，尤其是在一些嵌入式领域，我们希望有更轻量的计算结构。
+
+### Async.await
+问题集中到了最小化计算结构的表示上。实际上目前已经有了一个成熟的方案：状态机。
+我们直接将计算表示成一种新的数据结构，这个数据结构仅仅包含计算所必须的数据，然后通过runtime来将计算表示成不同的阶段和状态，从而成了一个状态机。这里我没有时间非常详细地阐述rust的方案了，其Future和Pin的设计更是比较复杂，感兴趣的话可以参考：[async-await in OS](https://os.phil-opp.com/async-await/)。
+
+### 为什么颜色是个好东西
+让我们回到函数副作用的视角上，很多人喜欢问：
+> What color is your function?
+
+很多人推崇golang一样的没有颜色的、非侵入式的异步方式，但是却没有注意，将有副作用的计算与无副作用的计算区分开具有十分重大的意义。有时间的话我会进一步阐述我的观点：为什么将计算效应表示出来是有价值的。
 
 ## Monad：一种描述计算的范畴化结构
+铺垫了这么多饺子，其实就是为了*monad*这碟醋。既然已经解决了如何用数据结构表示计算，下面就是如何让我们的计算效应可以同时表达多种结构，比如IO和错误处理。让我们把目光聚焦回`bind`：
+```rust
+fn bind<A, B>(
+    ma: todo!("某种确定了返回结果类型为`A`的计算结构"),
+    continuation: impl FnOnce(A) -> todo!("某种确定了返回结果类型为`B`的计算结构"),
+) -> todo!("某种确定了返回结果类型为`B`的计算结构"),;
+```
+这里的`todo!("某种确定了返回结果类型为`A`的计算结构")`可以表达任何一种计算效应的数据结构，我们如何从类型上去表示呢？
+
+### Higher-Kinded Type
+计算效应的抽象就藏在类型系统中，这种类型叫做Higher-Kinded Type（HKT）。
+这一概念其实十分简单，如果说`fn`函数是value层面的函数，那么HKT就是类型层面的函数，其接受一个类型参数，返回一个新的类型，并且在编译期就完成了计算。比如在Haskell中，我们的`Functor`:
+```haskell
+class Functor f where
+    fmap: (a -> b) -> f a -> f b
+```
+让我们直接翻译到Rust:
+```rust
+trait Hkt {
+    type Ap<T>;
+}
+
+trait Functor<F: Hkt> {
+    fn fmap<A, B>(f: impl FnOnce(A) -> B, fa: F::Ap<A>) -> F::Ap<B>;
+}
+```
+由于Rust并不直接支持HKT，但是我们还有GAT！通过GAT我们一样可以完美模拟HKT。
+这里的HKT就如`Java`中的`ArrayList`，就如`C++`中的`vector`，接受内部元素的类型`T`，返回新的类型`vector<T>`。
+
+于是我们可以抽象我们的`bind`了！
+```rust
+trait Monad<M: Hkt> {
+    fn bind<A, B>(ma: M::Ap<A>, f: impl FnOnce(A) -> M::Ap<B>) -> M::Ap<B>;
+```
+或者也许用Haskell的语法更清晰些：
+```haskell
+class Monad where
+    bind: m a -> (a -> m b) -> m b
+```
+如果我们想处理错误，那么`M`就是：
+```rust
+struct ErrorHandle;
+
+impl Hkt for ErrorHandle {
+    type Ap<T> = io::Result<T>;
+}
+```
+如果我们想处理IO：
+```rust
+struct GetCharFuture {
+    // ...
+}
+
+impl Hkt for GetCharFuture {
+    type Ap<T> = Box<dyn Future<Output = u8>>;
+}
+```
+只是这里为了表示Future，引入了一点额外的Box dyn开销。
+
+### 嵌套「嵌套『嵌套「...」』」
+
 
 ## 分而治之的泛化：计算的结构化
 
@@ -162,15 +248,13 @@ mod io {
 
 ## Free monad：One monad for all
 
-## Coroutine
-
 ## 代数计算效应
 
 ## One-shot effects
 
 ## 基本计算效应
 
-## Trait-level monad
+## Higher-level monad
 
 ## Tokio
 
