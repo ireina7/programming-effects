@@ -235,12 +235,81 @@ impl Hkt for GetCharFuture {
 ```
 只是这里为了表示Future，引入了一点额外的Box dyn开销。
 
+> Monad的完整定义不止bind：
+> ```haskell
+> class Monad m where
+>   pure :: a -> m a
+>   bind :: m a -> (a -> m b) -> m b
+> ```
+> 并且还需要满足一些代数性质，感兴趣的话可以了解范畴论
+
 ### 嵌套「嵌套『嵌套「...」』」
+前面的例子都太简单了，以至于我们还没有触及到javascript程序员喜欢提到的回调地狱（callback hell）。让我们回到之前的错误处理例子：
+```rust
+fn command<Io: GetChar + Bind>() -> io::Result<()> {
+    let c: io::Result<u8> = Io::get_char();
+    Io::bind(c, |c| {
+        // 剩余的计算...
+    })
+}
+```
+下面除了`get_char`之外，我们引入更多的可能出错的操作：
+```rust
+fn command<Io: GetChar + Bind>() -> io::Result<()> {
+    let c: io::Result<u8> = Io::get_char();
+    Io::bind(c, |c| {
+        Io::bind(parser::parse(c), |s| {
+            Io::bind(send(s), |ack| {
+                println!("{:?}, {:?}, {:?}", c, s, ack);
+                // 剩余的计算...
+            })
+        })
+    })
+}
+```
+仅仅三个调用就有了这么多嵌套！随着函数逻辑的复杂化，嵌套将嵌套嵌套，我想没有人会喜欢这种写法，所以Rust使用了`?`operator：
+```rust
+fn command<Io: GetChar + Bind>() -> io::Result<()> {
+    let c: u8 = Io::get_char()?;
+    let s = parser::parse(c)?;
+    let ack = send(s)?;
+    println!("{:?}, {:?}, {:?}", c, s, ack);
+    // 剩余的计算...
+}
+```
+清晰多了！然而`?`只能针对`Try`trait，如果是IO呢？IO我们有`.await`：
+```rust
+async fn command<Io: GetChar + Bind>() -> io::Result<()> {
+    let c: u8 = Io::get_char().await?;
+    let s = parser::parse(c)?;
+    let ack = send(s).await?;
+    println!("{:?}, {:?}, {:?}", c, s, ack);
+    // 剩余的计算...
+}
+```
+如果是更多的计算效应呢？Haskell发明了*do-notation*：
+```haskell
+command :: Monad m => m ()
+command = do
+    c <- getChar
+    s <- parse c
+    ack <- send s
+    println "{:?}, {:?}, {:?}" c s ack
+    -- 剩余的计算...
+```
+这里的`m`可以是任意满足Monad的HKT，即适用于所有构成Monad的计算效应。
+我不打算深入阐述这里的实现（其实就是宏变换），其实我们并不一定需要用do-notation来表达通用的计算效应，下文会进一步阐述这里。
 
+## 分而治之的泛化：算法的结构化
+在进入下一个话题之前，我想写下我在算法领域的一点小小的发现，即：
+> 几乎所有的递归问题都可以通过把分而治之和计算效应结合起来解决。
 
-## 分而治之的泛化：计算的结构化
+详细的阐述足够写一本书，通过计算效应我们甚至可以发展出千奇百怪的数据结构。这里我仅表达其中的核心思想：
+> 每当你发现直接分治不足以合并出来更大的问题的解时，使用计算效应的数据结构扩展返回的类型，直到可以组合出更大问题的计算效应。
 
 ## Monad的组合问题
+Monad看起来似乎很美好？NO！Monad居然不是可以随意组合的！？
+
 
 ## Monad为什么不适合无GC的语言
 
