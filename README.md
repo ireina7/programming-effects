@@ -23,6 +23,7 @@ result = do
 - parse是否可能出错
 - eval是否可能出错
 - send网络是否故障，是否阻塞其它任务
+- 日志与打点
 - etc...
 
 读者此时可以认为计算效应的目的就在于让程序员可以写上面干净的伪代码而无需手写大量计算副作用的细节（而且我们也无需使用所谓DSL）。
@@ -227,6 +228,7 @@ trait Functor<F: Hkt> {
 }
 ```
 由于Rust并不直接支持HKT，但是我们还有GAT！通过GAT我们一样可以完美模拟HKT。
+上面Haskell代码里的`f`和Rust代码里的`Ap`(或`F`，这里由于使用GAT模拟了HKT，两者均可看作hkt)就是HKT。
 这里的HKT就如`Java`中的`ArrayList`，就如`C++`中的`vector`，接受内部元素的类型`T`，返回新的类型`vector<T>`。
 
 于是我们可以抽象我们的`bind`了！
@@ -239,7 +241,9 @@ trait Monad<M: Hkt> {
 class Monad where
     bind: m a -> (a -> m b) -> m b
 ```
-如果我们想处理错误，那么`M`就是：
+为什么接口名叫`Monad`呢？这其实是个来自范畴论（Category Theory）的概念，这里不打算详细介绍，读者只需要把`Monad`当作一个约定俗成的名字就好。
+
+让我们来体验一下抽象的力量：如果我们想处理错误，那么`M`就是：
 ```rust
 struct ErrorHandle;
 
