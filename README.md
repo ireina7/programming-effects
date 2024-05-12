@@ -498,8 +498,16 @@ fn fake_mutable_state_using_shadow(x: i32) {
 如果说thread local的可变状态是在同一个线程内通信，那么多线程共享的变量毫无疑问更为复杂，因为它是与世界上不同的线程进行通信，任何过程，事件都可以看作一个线程。
 
 ### Debugging
+我把错误处理、metrics、logging、tracing等系统观测行为统称为Debugging效应。我们都知道，错误处理的逻辑往往比主逻辑还复杂，因此代码往往变得臃肿复杂，核心逻辑被隐藏在了重重的错误处理和观测上报之间。让我们首先回顾一下最常见的错误处理，首先我们从Java和Golang进行过渡，然后了解下Rust是如何对错误处理进行建模的。
+
+之前也提到过，熟悉Java一定离不开exception。Java的checked exception其实是个很好的东西，只是Java本身过于依赖子类型多态所以导致很多程序员觉得不好用。我认为通过类型系统保证各种类型的exception被正确处理是十分重要的。只是exception并非完全没有开销而且有些错误其实没必要一定使用exception来建模，这点后来的golang和rust都非常克制地使用exception来处理问题。
+
+接下来我们看看golang的错误处理，其实说实话golang根本就没啥完整的错误处理系统，基本就是靠程序员手动处理，也就是常常被提到的`if err != nil`。
+
 ### 依赖注入
+
 ### 不确定性
+不确定性无处不在，但是大部分场合我们都将其称作“容器”而非不确定性。
 
 ## Higher-level monad
 monad一定要要求具体的hkt类型是同一个类型吗？从定义上看貌似确实，实际上我们可以提高一层抽象，用trait(typeclass)来约束即可，比如rust的future：
@@ -540,7 +548,6 @@ fn main() {
 现在一切秘密都已经展现在我的眼前了，我们之前提到的一个第三方runtime就是这里的`tokio::runtime::Runtime`，我们创建一个任务（async 块），然后把任务丢给runtime去真正运行。接下来我们来看一个更复杂的例子：
 ```rust
 use tokio::net::{TcpListener, TcpStream};
-use mini_redis::{Connection, Frame};
 
 async fn process(socket: TcpStream);
 
