@@ -523,14 +523,62 @@ Tokio是Rust社区广泛使用的异步运行时，通过tokio可以非常直接
 
 在深入解析Tokio之前，我们先来了解一下Tokio最基本的用法：
 ```rust
-async fn business() {
-
+#[tokio::main]
+async fn main() {
+    println!("Hello, world!");
 }
 ```
+首先当然是hello world，看起来和普通的hello world并无区别？让我们cargo expand一下：
+```rust
+fn main() {
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        println!("Hello, world!");
+    })
+}
+```
+现在一切秘密都已经展现在我的眼前了，我们之前提到的一个第三方runtime就是这里的`tokio::runtime::Runtime`，我们创建一个任务（async 块），然后把任务丢给runtime去真正运行。接下来我们来看一个更复杂的例子：
+```rust
+use tokio::net::{TcpListener, TcpStream};
+use mini_redis::{Connection, Frame};
+
+async fn process(socket: TcpStream);
+
+async fn server() {
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+
+    loop {
+        let (socket, _) = listener.accept().await.unwrap();
+        process(socket).await;
+    }
+}
+```
+这个example其实也只是写了一种最简单的server，并没有多复杂，但是体现了tokio的一些用法：从tokio中提供的异步能力中，使用async-await进行组合。最后我们还需要看一下如何新启动一个任务：
+```rust
+async fn server() {
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+
+    loop {
+        let (socket, _) = listener.accept().await.unwrap();
+        tokio::spawn(async move {
+            process(socket).await;
+        });
+    }
+}
+```
+这里我们改进了之前的server，不同请求之间不再有依赖关系，每个请求都新`spawn`了一个future去处理，每个任务不是真实的线程而是“虚拟的线程”，不会阻塞真正的线程。
+
+当然，Tokio除了最基本的runtime，还有许多其他功能，比如各种io driver，但是这里我们最关注的还是runtime，有兴趣的读者可以自行了解其他模块。接下来我们仔细看看runtime的具体实现。
 
 ### 线程池
+早在异步编程流行之前，线程池就已经被广泛使用了，可以认为线程池是异步runtime的基础组件之一。Tokio为线程池提供了多种不同的实现，主要有：
+blocking pool, Multithread pool。
+
 #### Blocking pool
+blocking pool是一个可以允许阻塞的线程池，因此只适合计算密集型或其他特殊的任务（一般我们不一定会使用到）。某种程度上来说，blocking pool更接近传统意义上的线程池。这个线程池的实现相对简单，由于不会涉及到频繁的上下文切换，只使用了一个全局的任务队列，不同线程从这个全局队列中获取任务并执行。
+
 #### Multithread pool
+Multithread pool是tokio runtime的核心组件。不同于blocking pool的是，由于可能会出现非常频繁的上下文切换和跨线程处理，每个线程允许拥有自己独立的task queue，即worker-local queue。
 
 ### worker-local queue
 ### 任务steal
@@ -546,6 +594,7 @@ async fn business() {
 因而在工程上我们很难找到一种计算的最优策略，将效应与逻辑分离，可以让我们的程序自动采用不同的策略处理不同的场景，这是十分有价值的。
 #### 最后
 大部分的代码忘记了该如何抽象，忘记了副作用的存在，也忘记了制约复杂度。可是如果一切都很美好，人们又会继续主动制造新的困难、新的技术。
-有时觉得软件和人的身体很像，如果每个人平时就勤于保持健康，很多问题从最初也许就可以避免；如果只有亡羊补牢才能体现出医术的价值，世间便再无健康与幸福，其价值就是不幸的根源之一。
+有时觉得软件和人的身体很像，如果每个人平时就勤于保持健康，很多问题从最初也许就可以避免；如果只有亡羊补牢才能体现出医术的价值，世间便再无健康与幸福，其价值就是不幸根源之表现。
 
 谨以此文祭奠我逝去的一切，并以此文献给勇于投身与软件复杂度搏斗的勇士，是你们相信想象力和抽象可以改变思维与游戏规则，是你们照亮了世界，照亮了我的人生。
+
